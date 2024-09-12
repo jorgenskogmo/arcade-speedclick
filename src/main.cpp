@@ -14,12 +14,13 @@ Note: If code-upload fails, reboot board while pressing BOOT button
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <SparkFun_Qwiic_OLED.h>
 #include <SparkFun_Qwiic_Button.h>
 #include "CountDown.h"
 #include "i2c-scanner.h"
-#include <WiFi.h>
-#include <HTTPClient.h>
+#include "tiny_code_reader.h"
 
 #include <res/qw_fnt_5x7.h> // QW_FONT_5X7
 #include <res/qw_fnt_8x16.h> // QW_FONT_8X16
@@ -149,15 +150,16 @@ void loop()
     while (redButton.isPressed() == true)
       delay(10);  //wait for user to stop pressing
     Serial.println("redButton released");
-
-    Serial.println("new game, reset btn");
-    delay(1000);
-    state = 0; // restart
-    // state = 201;
+    
+    // delay(1000);
+    // state = 0; // restart
+    
+    // state = 201; // save
+    state = 301; // read qr
   }
 
   // save game
-  if( state > 200 ){
+  if( state < 300 && state > 200 ){
     
     if( state == 201 ){
       Serial.println("Saving");
@@ -209,6 +211,7 @@ void loop()
         state = 0;
       }
     }
+    delay(200);
   }
   
   
@@ -256,6 +259,95 @@ void loop()
 
       myOLED.display();
     }
+    delay(2); // 2  // TODO: implement different delays for the states?
   }
-  delay(20); // 2
+
+  // QR
+  if( state > 300 ){
+    if( state == 301 ){
+      tiny_code_reader_results_t results = {};
+      // Perform a read action on the I2C address of the sensor to get the
+      // current face information detected.
+      if (!tiny_code_reader_read(&results)) {
+        Serial.println("No QR reader found");
+        delay(200);
+        return;
+      }else{
+        if (results.content_length == 0) {
+          // Serial.println("No code found");
+          myOLED.erase();
+          myOLED.text(4, 4, "Show me a QR code", 1);
+          myOLED.display();
+          // TODO: add timeout? progressbar?
+
+        } else {
+          Serial.print("Found '");
+          Serial.print((char*)results.content_bytes);
+          Serial.println("'\n");
+          
+          myOLED.erase();
+          myOLED.text(4, 4, "QR read!", 1);
+          myOLED.display();
+
+          // verify code with backend,
+          String payload = "http://192.168.7.87:5555/qr/verify?code=";
+          payload += (char *)results.content_bytes;
+          Serial.println("payload:"+ payload);
+
+          if(WiFi.status() == WL_CONNECTED){
+            Serial.println("verifying code with server");
+            http.begin(payload);
+            delay(1000);
+            myOLED.erase();
+            myOLED.text(4, 4, "Checking...", 1);
+            myOLED.display();
+            state = 310;
+          }else{
+            // what to do here?
+          }
+        }
+      }
+      delay(200);
+    }
+
+
+    // verify code with backend,
+    if( state == 310) {
+      int httpCode = http.GET();
+      if (httpCode > 0) {
+        String response = http.getString();
+        http.end();
+        Serial.println("httpCode:"+ httpCode);
+        Serial.println("response:"+ response);
+        
+        // greet owner,
+        // explain lifes
+        // await greenbtn -> go!
+        myOLED.erase();
+        myOLED.text(4, 4, "Hello {PLAYER}!", 1);
+        myOLED.text(4, 12, "You have {LIVES} left on this QR", 1);
+        myOLED.text(4, 20, "Press Green to play", 1);
+        myOLED.display();
+        state = 320;
+        
+      } else {
+        Serial.println("Error on HTTP request");
+        myOLED.erase();
+        myOLED.text(4, 4, "Net Error: "+ String(httpCode), 1);
+        myOLED.display();
+        http.end();
+        delay(1000);
+        // what to do here?
+        // Serial.println("new game, post error");
+        // state = 0;
+      }
+
+      
+    }
+
+    if( state == 320){
+      // await green btn
+    }
+  }
+
 }
