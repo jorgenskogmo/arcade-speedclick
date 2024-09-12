@@ -338,8 +338,6 @@ void loop()
         http.end();
         delay(1000);
         // what to do here?
-        // Serial.println("new game, post error");
-        // state = 0;
       }
 
       
